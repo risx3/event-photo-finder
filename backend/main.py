@@ -2,17 +2,21 @@ import os
 import sys
 import pickle
 import logging
+import asyncio
+import concurrent.futures
+from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from face_engine import get_best_embedding, find_matches
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
+from face_engine import get_best_embedding, build_search_index, search_index
 
 load_dotenv()
 
@@ -23,7 +27,54 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Wedding Photo Finder")
+INDEX_PATH = Path(__file__).parent / "embeddings_index.pkl"
+FRONTEND_PATH = Path(__file__).parent.parent / "frontend" / "index.html"
+
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.4"))
+MAX_RESULTS = int(os.getenv("MAX_RESULTS", "50"))
+
+# Bounded thread pool for CPU-bound face inference.
+# Keeps concurrent inference jobs ≤ CPU count so they don't thrash.
+_cpu_count = os.cpu_count() or 2
+_inference_pool = concurrent.futures.ThreadPoolExecutor(max_workers=_cpu_count)
+
+
+def _load_index_from_disk() -> dict | None:
+    if not INDEX_PATH.exists():
+        return None
+    with open(INDEX_PATH, "rb") as f:
+        return pickle.load(f)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load the embeddings index once at startup and keep it in memory."""
+    data = _load_index_from_disk()
+    if data:
+        entries = data.get("entries", [])
+        # Pre-build the vectorized search index (normalised numpy matrix + metadata list).
+        vectors, metadata = build_search_index(entries)
+        app.state.index_meta = {
+            "total_photos": data.get("total_photos", 0),
+            "total_embeddings": len(entries),
+            "indexed_at": data.get("indexed_at"),
+        }
+        app.state.vectors = vectors    # np.ndarray (n, 512), L2-normalised
+        app.state.metadata = metadata  # list[dict] — no embedding arrays
+        logger.info(
+            f"Index loaded: {len(entries)} embeddings from "
+            f"{data.get('total_photos', 0)} photos"
+        )
+    else:
+        app.state.index_meta = None
+        app.state.vectors = None
+        app.state.metadata = None
+        logger.warning("No index found. Run: uv run python backend/indexer.py")
+    yield
+    _inference_pool.shutdown(wait=False)
+
+
+app = FastAPI(title="Wedding Photo Finder", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,19 +82,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-INDEX_PATH = Path(__file__).parent / "embeddings_index.pkl"
-FRONTEND_PATH = Path(__file__).parent.parent / "frontend" / "index.html"
-
-SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.4"))
-MAX_RESULTS = int(os.getenv("MAX_RESULTS", "50"))
-
-
-def load_index() -> dict | None:
-    if not INDEX_PATH.exists():
-        return None
-    with open(INDEX_PATH, "rb") as f:
-        return pickle.load(f)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -61,38 +99,30 @@ async def health():
 
 
 @app.get("/api/status")
-async def status():
-    data = load_index()
-    if data is None:
-        return {
-            "indexed": False,
-            "total_photos": 0,
-            "total_embeddings": 0,
-            "indexed_at": None,
-        }
-    return {
-        "indexed": True,
-        "total_photos": data.get("total_photos", 0),
-        "total_embeddings": len(data.get("entries", [])),
-        "indexed_at": data.get("indexed_at"),
-    }
+async def status(request: Request):
+    meta = request.app.state.index_meta
+    if meta is None:
+        return {"indexed": False, "total_photos": 0, "total_embeddings": 0, "indexed_at": None}
+    return {"indexed": True, **meta}
 
 
 @app.post("/api/match")
-async def match_faces(selfie: UploadFile = File(...)):
+async def match_faces(request: Request, selfie: UploadFile = File(...)):
     logger.info(f"Received selfie: {selfie.filename} ({selfie.content_type})")
 
-    # Validate mime type loosely
     if selfie.content_type and not selfie.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Uploaded file is not an image")
 
     image_bytes = await selfie.read()
-    if len(image_bytes) == 0:
+    if not image_bytes:
         raise HTTPException(status_code=400, detail="Empty file uploaded")
 
-    # Extract face embedding
+    # Run CPU-bound inference off the event loop so other requests aren't blocked.
+    loop = asyncio.get_event_loop()
     try:
-        embedding = get_best_embedding(image_bytes)
+        embedding = await loop.run_in_executor(
+            _inference_pool, get_best_embedding, image_bytes
+        )
     except Exception as e:
         logger.error(f"Face extraction error: {e}")
         raise HTTPException(status_code=500, detail=f"Face processing error: {str(e)}")
@@ -106,32 +136,19 @@ async def match_faces(selfie: UploadFile = File(...)):
             "photos": [],
         }
 
-    # Load index
-    data = load_index()
-    if data is None:
+    vectors = request.app.state.vectors
+    metadata = request.app.state.metadata
+
+    if vectors is None:
         raise HTTPException(
             status_code=503,
-            detail="Photo index not built yet. Run the indexer first: python backend/indexer.py",
+            detail="Photo index not built yet. Run: uv run python backend/indexer.py",
         )
 
-    entries = data.get("entries", [])
-    if not entries:
+    if len(metadata) == 0:
         return {"success": True, "matched_count": 0, "photos": []}
 
-    # Match
-    matches = find_matches(embedding, entries, SIMILARITY_THRESHOLD, MAX_RESULTS)
+    matches = search_index(embedding, vectors, metadata, SIMILARITY_THRESHOLD, MAX_RESULTS)
     logger.info(f"Found {len(matches)} matching photo(s) above threshold {SIMILARITY_THRESHOLD}")
 
-    photos = [
-        {
-            "file_id": m["file_id"],
-            "filename": m["filename"],
-            "view_url": m["view_url"],
-            "download_url": m["download_url"],
-            "similarity_score": m["similarity_score"],
-            "thumbnail_url": m["thumbnail_url"],
-        }
-        for m in matches
-    ]
-
-    return {"success": True, "matched_count": len(photos), "photos": photos}
+    return {"success": True, "matched_count": len(matches), "photos": matches}

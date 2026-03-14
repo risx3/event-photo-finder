@@ -108,9 +108,17 @@ Indexing complete!
 
 ## Starting the Server
 
+**Development** (single process, auto-reload):
 ```bash
 uv run uvicorn backend.main:app --reload
 ```
+
+**Production / high traffic** (multiple worker processes):
+```bash
+uv run uvicorn backend.main:app --workers 4
+```
+
+Use `--workers` equal to your CPU core count. Each worker loads the model and index independently, so 4 workers can handle 4 simultaneous face inference jobs in parallel.
 
 Open your browser at **http://localhost:8000**
 
