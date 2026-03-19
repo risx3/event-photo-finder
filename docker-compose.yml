@@ -1,0 +1,55 @@
+name: event-photo-finder
+
+services:
+
+  # ── Application server ────────────────────────────────────────────────────────
+  # docker compose up
+  server:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      # Persist the InsightFace buffalo_l model (~200 MB) so it is not
+      # re-downloaded every time the container restarts.
+      - insightface_models:/root/.insightface
+
+      # Share the backend directory so the server can read the embeddings
+      # index produced by the indexer service below.
+      - ./backend:/app/backend
+
+      # Place your Google service account JSON at secrets/service_account.json
+      # (the secrets/ directory is git-ignored).
+      - ./secrets:/run/secrets:ro
+    env_file:
+      - .env                          # GOOGLE_DRIVE_FOLDER_ID, EVENT_NAME, etc.
+    environment:
+      # Always point to the mounted secrets path inside the container,
+      # regardless of what GOOGLE_SERVICE_ACCOUNT_JSON is set to in .env.
+      GOOGLE_SERVICE_ACCOUNT_JSON: /run/secrets/service_account.json
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  # ── One-shot indexer ──────────────────────────────────────────────────────────
+  # Run once before starting the server, and re-run after adding new photos:
+  #   docker compose run --rm indexer
+  indexer:
+    build: .
+    command: ["uv", "run", "python", "backend/indexer.py"]
+    profiles: ["indexer"]             # excluded from `docker compose up`
+    volumes:
+      - insightface_models:/root/.insightface
+      - ./backend:/app/backend        # indexer writes embeddings_index.pkl here
+      - ./temp:/app/temp
+      - ./secrets:/run/secrets:ro
+    env_file:
+      - .env
+    environment:
+      GOOGLE_SERVICE_ACCOUNT_JSON: /run/secrets/service_account.json
+
+volumes:
+  insightface_models:                 # named volume — survives container restarts

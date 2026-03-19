@@ -1,0 +1,33 @@
+# Version control
+.git/
+.gitignore
+
+# Python runtime & cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+
+# Secrets — never include in the build context
+.env
+secrets/
+*.json
+!frontend/package.json
+
+# Generated data — provided via volume mounts at runtime
+backend/embeddings_index.pkl
+
+# Temp downloads
+temp/*
+!temp/.gitkeep
+
+# Frontend dependencies (rebuilt inside Docker) and previous builds
+frontend/node_modules/
+frontend/dist/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
