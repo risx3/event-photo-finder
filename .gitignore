@@ -6,9 +6,10 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Environment & secrets
+# Environment & secrets — exclude JSON broadly but allow frontend manifests
 .env
 *.json
+!frontend/package.json
 
 # Generated index
 backend/embeddings_index.pkl
@@ -16,6 +17,10 @@ backend/embeddings_index.pkl
 # Temp downloads
 temp/*
 !temp/.gitkeep
+
+# Frontend build output & dependencies
+frontend/dist/
+frontend/node_modules/
 
 # macOS
 .DS_Store

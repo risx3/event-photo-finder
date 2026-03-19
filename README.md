@@ -1,6 +1,8 @@
-# Wedding Photo Finder
+# Event Photo Finder
 
-A web app where wedding guests upload a selfie and instantly receive all wedding photos containing their face. Photos are stored in Google Drive and matched using AI face recognition.
+A web app where event guests upload a selfie and instantly receive all event photos containing their face. Photos are stored in Google Drive and matched using AI face recognition.
+
+Works for any event — weddings, conferences, birthday parties, corporate gatherings, and more.
 
 ---
 
@@ -15,9 +17,10 @@ A web app where wedding guests upload a selfie and instantly receive all wedding
 ## Prerequisites
 
 - Python 3.9+
+- Node.js 18+ (for the React frontend)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
 - A Google Cloud project with the Drive API enabled
-- Wedding photos in a Google Drive folder
+- Event photos in a Google Drive folder
 
 ---
 
@@ -25,7 +28,7 @@ A web app where wedding guests upload a selfie and instantly receive all wedding
 
 ### 1. Create a Google Cloud Project
 1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Click **New Project**, give it a name (e.g. "Wedding Photo Finder"), and create it.
+2. Click **New Project**, give it a name (e.g. "Event Photo Finder"), and create it.
 
 ### 2. Enable the Google Drive API
 1. In your project, go to **APIs & Services → Library**
@@ -34,7 +37,7 @@ A web app where wedding guests upload a selfie and instantly receive all wedding
 ### 3. Create a Service Account
 1. Go to **APIs & Services → Credentials**
 2. Click **Create Credentials → Service Account**
-3. Give it a name (e.g. "wedding-photo-finder"), click **Create and Continue**
+3. Give it a name (e.g. "event-photo-finder"), click **Create and Continue**
 4. Skip optional role/access fields and click **Done**
 5. Click the service account you just created
 6. Go to the **Keys** tab → **Add Key → Create new key → JSON**
@@ -42,7 +45,7 @@ A web app where wedding guests upload a selfie and instantly receive all wedding
 
 ### 4. Share Your Drive Folder With the Service Account
 1. Copy the service account email (looks like `name@project.iam.gserviceaccount.com`)
-2. In Google Drive, right-click your wedding photos folder → **Share**
+2. In Google Drive, right-click your event photos folder → **Share**
 3. Paste the service account email and give it **Viewer** access
 4. Click **Share**
 
@@ -60,13 +63,14 @@ https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz
 
 ```bash
 # Clone / navigate to the project
-cd wedding-photo-finder
+cd event-photo-finder
 
-# Create a virtual environment and install all dependencies
+# Install Python dependencies
 uv sync
-```
 
-This creates a `.venv` folder and installs everything from `pyproject.toml` in one step.
+# Install frontend dependencies
+cd frontend && npm install && cd ..
+```
 
 > **Note:** InsightFace will automatically download the `buffalo_l` model (~200 MB) on first run. Ensure you have an internet connection.
 
@@ -79,6 +83,12 @@ Edit `.env` in the project root:
 ```env
 GOOGLE_SERVICE_ACCOUNT_JSON=path/to/your/service_account.json
 GOOGLE_DRIVE_FOLDER_ID=your_folder_id_here
+
+# UI branding (shown in the app header)
+EVENT_NAME=My Event
+EVENT_SUBTITLE=Find all your photos from this event
+
+# Match tuning
 SIMILARITY_THRESHOLD=0.4   # Lower = more matches (less strict). Range: 0.0 – 1.0
 MAX_RESULTS=50             # Max photos returned per search
 ```
@@ -108,38 +118,48 @@ Indexing complete!
 
 ## Starting the Server
 
-**Development** (single process, auto-reload):
+**Development** (two terminals, with hot reload):
 ```bash
+# Terminal 1 — Python backend
 uv run uvicorn backend.main:app --reload
+
+# Terminal 2 — React frontend (Vite dev server on :5173)
+cd frontend && npm run dev
 ```
 
-**Production / high traffic** (multiple worker processes):
+**Production** (build frontend, serve everything from FastAPI):
 ```bash
+cd frontend && npm run build && cd ..
 uv run uvicorn backend.main:app --workers 4
 ```
 
-Use `--workers` equal to your CPU core count. Each worker loads the model and index independently, so 4 workers can handle 4 simultaneous face inference jobs in parallel.
+Use `--workers` equal to your CPU core count. Each worker loads the model and index independently.
 
-Open your browser at **http://localhost:8000**
+Open your browser at **http://localhost:8000** (production) or **http://localhost:5173** (dev).
 
 ---
 
 ## Project Structure
 
 ```
-wedding-photo-finder/
+event-photo-finder/
 ├── backend/
 │   ├── main.py               # FastAPI app (API routes + static serving)
 │   ├── face_engine.py        # InsightFace embedding + cosine similarity
 │   ├── drive_client.py       # Google Drive API client
 │   ├── indexer.py            # One-time indexing script
-│   ├── embeddings_index.pkl  # Auto-generated after indexing
-│   └── requirements.txt      # For reference (pyproject.toml is authoritative)
+│   └── embeddings_index.pkl  # Auto-generated after indexing
 ├── frontend/
-│   └── index.html            # Single-page UI (no framework)
+│   ├── package.json          # React + Vite dependencies
+│   ├── vite.config.js        # Dev server proxy config
+│   ├── index.html            # Vite entry point
+│   └── src/
+│       ├── App.jsx           # Main state machine
+│       ├── App.css           # Design system
+│       └── components/       # Header, UploadCard, Results, SettingsPanel, …
 ├── temp/                     # Temp download folder (auto-cleaned after indexing)
 ├── pyproject.toml            # uv project manifest
-├── .gitignore                # Excludes .env, *.json, .venv, embeddings index
+├── .gitignore
 ├── .env                      # Your credentials and config (never committed)
 └── README.md
 ```
@@ -150,9 +170,9 @@ wedding-photo-finder/
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/` | Serve the frontend |
 | `GET` | `/api/health` | Health check |
 | `GET` | `/api/status` | Index status (total photos, faces, last indexed) |
+| `GET` | `/api/config` | UI configuration (event name, subtitle) |
 | `POST` | `/api/match` | Upload selfie, get matching photos |
 
 ### POST /api/match
@@ -181,11 +201,15 @@ wedding-photo-finder/
 
 ## Customization
 
-**Change wedding couple names:**
-Edit the `<h1>` tag in `frontend/index.html`:
-```html
-<h1><em>Sarah</em> &amp; <em>James</em></h1>
+**Change the event name and subtitle:**
+
+Set them in `.env` for permanent server-side defaults:
+```env
+EVENT_NAME=Sarah & James — Wedding 2025
+EVENT_SUBTITLE=Find all your photos from our special day
 ```
+
+Or change them live from within the app by clicking the **⚙ gear icon** in the top-right corner. Settings are saved in the browser's localStorage and override the server defaults.
 
 **Adjust match sensitivity:**
 - Increase `SIMILARITY_THRESHOLD` (e.g. `0.5`) for stricter / fewer matches
@@ -211,7 +235,8 @@ Edit the `<h1>` tag in `frontend/index.html`:
 - Confirm the service account email was added as a Viewer to the folder
 
 **Server not starting**
-- Run `uv sync` to make sure all dependencies are installed
+- Run `uv sync` to make sure all Python dependencies are installed
+- Run `cd frontend && npm install` to make sure frontend dependencies are installed
 - On Apple Silicon Macs, `onnxruntime` in `pyproject.toml` is already the correct CPU-only build
 
 **Thumbnails not loading in the browser**

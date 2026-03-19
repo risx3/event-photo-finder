@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 IMAGE_MIME_TYPES = {
     "image/jpeg",
-    "image/jpg",
     "image/png",
 }
 

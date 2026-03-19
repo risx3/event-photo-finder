@@ -1,4 +1,5 @@
 import logging
+import threading
 import numpy as np
 import cv2
 from insightface.app import FaceAnalysis
@@ -6,16 +7,20 @@ from insightface.app import FaceAnalysis
 logger = logging.getLogger(__name__)
 
 _app: FaceAnalysis | None = None
+_app_lock = threading.Lock()       # guards one-time model initialisation
+_inference_lock = threading.Lock() # InsightFace is not thread-safe for concurrent inference
 
 
 def get_face_app() -> FaceAnalysis:
     """Lazy-load and return the InsightFace app (buffalo_l model)."""
     global _app
     if _app is None:
-        logger.info("Loading InsightFace buffalo_l model (downloads on first run)...")
-        _app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
-        _app.prepare(ctx_id=0, det_size=(640, 640))
-        logger.info("InsightFace model loaded.")
+        with _app_lock:
+            if _app is None:  # double-checked locking
+                logger.info("Loading InsightFace buffalo_l model (downloads on first run)...")
+                _app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+                _app.prepare(ctx_id=0, det_size=(640, 640))
+                logger.info("InsightFace model loaded.")
     return _app
 
 
@@ -35,7 +40,8 @@ def get_all_embeddings(image_path: str) -> list[np.ndarray]:
     """Detect all faces in an image and return their embeddings."""
     app = get_face_app()
     img = load_image(image_path)
-    faces = app.get(img)
+    with _inference_lock:
+        faces = app.get(img)
     return [face.embedding for face in faces] if faces else []
 
 
@@ -46,7 +52,8 @@ def get_best_embedding(image_bytes: bytes) -> np.ndarray | None:
     """
     app = get_face_app()
     img = load_image(image_bytes)
-    faces = app.get(img)
+    with _inference_lock:
+        faces = app.get(img)
     if not faces:
         return None
     if len(faces) == 1:

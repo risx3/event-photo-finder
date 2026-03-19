@@ -27,15 +27,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-INDEX_PATH = Path(__file__).parent / "embeddings_index.pkl"
-FRONTEND_PATH = Path(__file__).parent.parent / "frontend" / "index.html"
+INDEX_PATH     = Path(__file__).parent / "embeddings_index.pkl"
+FRONTEND_DIST  = Path(__file__).parent.parent / "frontend" / "dist"
 
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.4"))
-MAX_RESULTS = int(os.getenv("MAX_RESULTS", "50"))
+MAX_RESULTS          = int(os.getenv("MAX_RESULTS", "50"))
+MAX_UPLOAD_BYTES     = int(os.getenv("MAX_UPLOAD_MB", "10")) * 1024 * 1024  # default 10 MB
+EVENT_NAME           = os.getenv("EVENT_NAME", "My Event")
+EVENT_SUBTITLE       = os.getenv("EVENT_SUBTITLE", "Find all your photos from this event")
 
 # Bounded thread pool for CPU-bound face inference.
 # Keeps concurrent inference jobs ≤ CPU count so they don't thrash.
-_cpu_count = os.cpu_count() or 2
+_cpu_count      = os.cpu_count() or 2
 _inference_pool = concurrent.futures.ThreadPoolExecutor(max_workers=_cpu_count)
 
 
@@ -55,11 +58,11 @@ async def lifespan(app: FastAPI):
         # Pre-build the vectorized search index (normalised numpy matrix + metadata list).
         vectors, metadata = build_search_index(entries)
         app.state.index_meta = {
-            "total_photos": data.get("total_photos", 0),
-            "total_embeddings": len(entries),
-            "indexed_at": data.get("indexed_at"),
+            "total_photos":      data.get("total_photos", 0),
+            "total_embeddings":  len(entries),
+            "indexed_at":        data.get("indexed_at"),
         }
-        app.state.vectors = vectors    # np.ndarray (n, 512), L2-normalised
+        app.state.vectors  = vectors    # np.ndarray (n, 512), L2-normalised
         app.state.metadata = metadata  # list[dict] — no embedding arrays
         logger.info(
             f"Index loaded: {len(entries)} embeddings from "
@@ -67,31 +70,24 @@ async def lifespan(app: FastAPI):
         )
     else:
         app.state.index_meta = None
-        app.state.vectors = None
-        app.state.metadata = None
+        app.state.vectors    = None
+        app.state.metadata   = None
         logger.warning("No index found. Run: uv run python backend/indexer.py")
     yield
     _inference_pool.shutdown(wait=False)
 
 
-app = FastAPI(title="Wedding Photo Finder", lifespan=lifespan)
+app = FastAPI(title="Event Photo Finder", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-
-@app.get("/")
-async def serve_frontend():
-    if not FRONTEND_PATH.exists():
-        raise HTTPException(status_code=404, detail="Frontend not found")
-    return FileResponse(str(FRONTEND_PATH), media_type="text/html")
-
+# ── API Routes ────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 async def health():
@@ -106,6 +102,15 @@ async def status(request: Request):
     return {"indexed": True, **meta}
 
 
+@app.get("/api/config")
+async def get_config():
+    """Return UI configuration values sourced from environment variables."""
+    return {
+        "event_name":     EVENT_NAME,
+        "event_subtitle": EVENT_SUBTITLE,
+    }
+
+
 @app.post("/api/match")
 async def match_faces(request: Request, selfie: UploadFile = File(...)):
     logger.info(f"Received selfie: {selfie.filename} ({selfie.content_type})")
@@ -116,9 +121,14 @@ async def match_faces(request: Request, selfie: UploadFile = File(...)):
     image_bytes = await selfie.read()
     if not image_bytes:
         raise HTTPException(status_code=400, detail="Empty file uploaded")
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image too large. Maximum allowed size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
 
     # Run CPU-bound inference off the event loop so other requests aren't blocked.
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         embedding = await loop.run_in_executor(
             _inference_pool, get_best_embedding, image_bytes
@@ -136,7 +146,7 @@ async def match_faces(request: Request, selfie: UploadFile = File(...)):
             "photos": [],
         }
 
-    vectors = request.app.state.vectors
+    vectors  = request.app.state.vectors
     metadata = request.app.state.metadata
 
     if vectors is None:
@@ -152,3 +162,45 @@ async def match_faces(request: Request, selfie: UploadFile = File(...)):
     logger.info(f"Found {len(matches)} matching photo(s) above threshold {SIMILARITY_THRESHOLD}")
 
     return {"success": True, "matched_count": len(matches), "photos": matches}
+
+
+# ── Frontend SPA ──────────────────────────────────────────────────────────────
+# Must be registered AFTER all /api/* routes so API routes take priority.
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_spa(full_path: str):
+    """
+    Serve the built React app from frontend/dist/.
+
+    - Exact static file matches (JS, CSS, images) are served directly.
+    - Every other path returns index.html so React handles client navigation.
+
+    Development workflow:
+        cd frontend && npm run dev   (Vite on :5173, proxies /api → :8000)
+
+    Production workflow:
+        cd frontend && npm run build  (outputs to frontend/dist/)
+        uv run uvicorn backend.main:app
+    """
+    dist = FRONTEND_DIST
+
+    # Serve exact static files, with a path-traversal guard
+    if full_path:
+        candidate = (dist / full_path).resolve()
+        try:
+            candidate.relative_to(dist.resolve())
+            if candidate.is_file():
+                return FileResponse(str(candidate))
+        except ValueError:
+            pass  # traversal attempt — fall through to index.html
+
+    # SPA entry point (also handles "/")
+    html = dist / "index.html"
+    if html.exists():
+        return FileResponse(str(html), media_type="text/html")
+
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        {"detail": "Frontend not built. Run: cd frontend && npm run build"},
+        status_code=503,
+    )
