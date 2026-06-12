@@ -90,7 +90,7 @@ EVENT_SUBTITLE=Find all your photos from this event
 
 # Match tuning
 SIMILARITY_THRESHOLD=0.4   # Lower = more matches (less strict). Range: 0.0 – 1.0
-MAX_RESULTS=50             # Max photos returned per search
+MAX_RESULTS=50             # Max photos returned per search (0 = unlimited)
 
 # Abuse protection — limits how often one IP can call /api/match,
 # since face matching is CPU-intensive. Format: "<count>/<period>",
@@ -236,8 +236,11 @@ auto-renewing HTTPS via Let's Encrypt. HTTPS is required for the in-browser
 camera capture feature to work for guests.
 
 Since a custom domain isn't required, this uses [sslip.io](https://sslip.io)
-— a free wildcard DNS service that maps `<anything>-<ip-with-dashes>.sslip.io`
-to that IP address, which is enough for Let's Encrypt to issue a certificate.
+— a free wildcard DNS service that maps any hostname containing
+`<ip-with-dashes>` back to that IP address (e.g.
+`rishabhwedspooja.54-123-45-67.sslip.io` → `54.123.45.67`), which is enough
+for Let's Encrypt to issue a certificate. This lets you pick a friendly
+prefix instead of being stuck with `photos-<ip>.sslip.io`.
 
 ### 0. Prerequisite: share your Drive folder publicly
 
@@ -287,9 +290,9 @@ Log out and back in (so the `docker` group membership applies), then `cd ~/event
 
 2. Create `.env` (see [Configuration](#configuration) above) with your
    `GOOGLE_DRIVE_FOLDER_ID`, `EVENT_NAME`, etc.
-3. Edit [Caddyfile](Caddyfile): replace `photos-REPLACE-WITH-ELASTIC-IP.sslip.io`
-   with your Elastic IP, dots replaced by dashes —
-   e.g. `54.123.45.67` → `photos-54-123-45-67.sslip.io`
+3. Edit [Caddyfile](Caddyfile): replace the hostname with a prefix of your
+   choice plus your Elastic IP (dots replaced by dashes) —
+   e.g. `54.123.45.67` → `rishabhwedspooja.54-123-45-67.sslip.io`
 
 ### 4. Build the index and start the app
 
@@ -298,8 +301,8 @@ docker compose run --rm indexer   # builds the face embeddings index
 docker compose up -d --build      # starts the app + Caddy
 ```
 
-Visit `https://photos-<your-elastic-ip-with-dashes>.sslip.io` — Caddy will
-automatically obtain a TLS certificate on first request.
+Visit `https://<your-chosen-prefix>.<your-elastic-ip-with-dashes>.sslip.io` —
+Caddy will automatically obtain a TLS certificate on first request.
 
 ### 5. Keep the index up to date
 
