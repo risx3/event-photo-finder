@@ -6,8 +6,8 @@ services:
   # docker compose up
   server:
     build: .
-    ports:
-      - "${PORT:-8000}:8000"
+    expose:
+      - "8000"
     volumes:
       # Persist the InsightFace buffalo_l model (~200 MB) so it is not
       # re-downloaded every time the container restarts.
@@ -34,6 +34,22 @@ services:
       retries: 3
       start_period: 40s
 
+  # ── Reverse proxy / HTTPS ────────────────────────────────────────────────────
+  # Terminates TLS with an auto-renewing Let's Encrypt cert (see Caddyfile)
+  # and forwards everything to the app server.
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - server
+    restart: unless-stopped
+
   # ── One-shot indexer ──────────────────────────────────────────────────────────
   # Run once before starting the server, and re-run after adding new photos:
   #   docker compose run --rm indexer
@@ -53,3 +69,5 @@ services:
 
 volumes:
   insightface_models:                 # named volume — survives container restarts
+  caddy_data:                         # Let's Encrypt certificates
+  caddy_config:                       # Caddy runtime config/state

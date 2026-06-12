@@ -15,4 +15,5 @@ dependencies = [
     "tqdm",
     "Pillow",
     "onnxruntime",
+    "slowapi",
 ]

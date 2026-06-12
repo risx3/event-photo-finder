@@ -16,6 +16,9 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from face_engine import get_best_embedding, build_search_index, search_index
 
 load_dotenv()
@@ -35,6 +38,7 @@ MAX_RESULTS          = int(os.getenv("MAX_RESULTS", "50"))
 MAX_UPLOAD_BYTES     = int(os.getenv("MAX_UPLOAD_MB", "10")) * 1024 * 1024  # default 10 MB
 EVENT_NAME           = os.getenv("EVENT_NAME", "My Event")
 EVENT_SUBTITLE       = os.getenv("EVENT_SUBTITLE", "Find all your photos from this event")
+MATCH_RATE_LIMIT     = os.getenv("MATCH_RATE_LIMIT", "6/minute")
 
 # Bounded thread pool for CPU-bound face inference.
 # Keeps concurrent inference jobs ≤ CPU count so they don't thrash.
@@ -79,6 +83,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Event Photo Finder", lifespan=lifespan)
 
+# Rate limit the CPU-heavy face-matching endpoint to protect the server
+# from being overwhelmed by repeated public requests.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -112,6 +122,7 @@ async def get_config():
 
 
 @app.post("/api/match")
+@limiter.limit(MATCH_RATE_LIMIT)
 async def match_faces(request: Request, selfie: UploadFile = File(...)):
     logger.info(f"Received selfie: {selfie.filename} ({selfie.content_type})")
 

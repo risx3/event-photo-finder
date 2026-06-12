@@ -91,6 +91,11 @@ EVENT_SUBTITLE=Find all your photos from this event
 # Match tuning
 SIMILARITY_THRESHOLD=0.4   # Lower = more matches (less strict). Range: 0.0 – 1.0
 MAX_RESULTS=50             # Max photos returned per search
+
+# Abuse protection — limits how often one IP can call /api/match,
+# since face matching is CPU-intensive. Format: "<count>/<period>",
+# e.g. "6/minute", "100/hour".
+MATCH_RATE_LIMIT=6/minute
 ```
 
 ---
@@ -158,6 +163,12 @@ event-photo-finder/
 │       ├── App.css           # Design system
 │       └── components/       # Header, UploadCard, Results, SettingsPanel, …
 ├── temp/                     # Temp download folder (auto-cleaned after indexing)
+├── deploy/
+│   ├── setup-ec2.sh          # One-time EC2 provisioning (Docker install)
+│   ├── reindex.service       # systemd unit — rebuilds the index
+│   └── reindex.timer         # systemd timer — runs reindex nightly
+├── Caddyfile                 # Reverse proxy + auto HTTPS config (AWS deploy)
+├── docker-compose.yml
 ├── pyproject.toml            # uv project manifest
 ├── .gitignore
 ├── .env                      # Your credentials and config (never committed)
@@ -214,6 +225,95 @@ Or change them live from within the app by clicking the **⚙ gear icon** in the
 **Adjust match sensitivity:**
 - Increase `SIMILARITY_THRESHOLD` (e.g. `0.5`) for stricter / fewer matches
 - Decrease it (e.g. `0.3`) to cast a wider net
+
+---
+
+## AWS Deployment
+
+This deploys the app on a single EC2 instance using Docker Compose, with
+[Caddy](https://caddyserver.com/) as a reverse proxy providing free,
+auto-renewing HTTPS via Let's Encrypt. HTTPS is required for the in-browser
+camera capture feature to work for guests.
+
+Since a custom domain isn't required, this uses [sslip.io](https://sslip.io)
+— a free wildcard DNS service that maps `<anything>-<ip-with-dashes>.sslip.io`
+to that IP address, which is enough for Let's Encrypt to issue a certificate.
+
+### 0. Prerequisite: share your Drive folder publicly
+
+Guests' browsers load photo thumbnails/downloads directly from Google Drive
+(not proxied through your server), so the folder must be link-shareable:
+
+1. In Google Drive, right-click your event photos folder → **Share**
+2. Under **General access**, change to **Anyone with the link** → **Viewer**
+
+Anyone with a direct file link could then view that photo — acceptable for
+most events, but worth being aware of.
+
+### 1. Launch the EC2 instance
+
+1. AWS Console → **EC2** → **Launch instance**
+2. AMI: **Ubuntu Server 24.04 LTS**
+3. Instance type: **t3.small** (2 vCPU / 2 GB RAM — enough for InsightFace
+   under moderate guest load)
+4. Storage: 20 GB gp3 is plenty
+5. Security group:
+   - SSH (22) — restrict to **your IP only**
+   - HTTP (80) and HTTPS (443) — **anywhere** (needed for Let's Encrypt + guests)
+6. Launch, then **allocate an Elastic IP** and associate it with the instance
+   (so the IP doesn't change on reboot — important since it's baked into
+   your sslip.io hostname)
+
+### 2. Set up the server
+
+SSH into the instance, then run the setup script (installs Docker + Compose):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<your-fork>/event-photo-finder/main/deploy/setup-ec2.sh -o setup-ec2.sh
+bash setup-ec2.sh <your-repo-url>
+```
+
+(Or `scp` your project directory to the instance instead of cloning.)
+
+Log out and back in (so the `docker` group membership applies), then `cd ~/event-photo-finder`.
+
+### 3. Configure
+
+1. Upload your service account key:
+
+   ```bash
+   scp service_account.json <ec2-host>:~/event-photo-finder/secrets/
+   ```
+
+2. Create `.env` (see [Configuration](#configuration) above) with your
+   `GOOGLE_DRIVE_FOLDER_ID`, `EVENT_NAME`, etc.
+3. Edit [Caddyfile](Caddyfile): replace `photos-REPLACE-WITH-ELASTIC-IP.sslip.io`
+   with your Elastic IP, dots replaced by dashes —
+   e.g. `54.123.45.67` → `photos-54-123-45-67.sslip.io`
+
+### 4. Build the index and start the app
+
+```bash
+docker compose run --rm indexer   # builds the face embeddings index
+docker compose up -d --build      # starts the app + Caddy
+```
+
+Visit `https://photos-<your-elastic-ip-with-dashes>.sslip.io` — Caddy will
+automatically obtain a TLS certificate on first request.
+
+### 5. Keep the index up to date
+
+New photos added to Drive won't show up until the index is rebuilt. Install
+the provided systemd timer to rebuild it automatically every night at 4 AM:
+
+```bash
+sudo cp deploy/reindex.service deploy/reindex.timer /etc/systemd/system/
+sudo systemctl enable --now reindex.timer
+```
+
+Adjust `User=` and `WorkingDirectory=` in `reindex.service` if you deployed
+under a different user or path. To trigger an immediate rebuild:
+`sudo systemctl start reindex.service`.
 
 ---
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=Rebuild the event photo face-embeddings index from Google Drive
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Adjust User= and WorkingDirectory= if your app lives elsewhere or you
+# deploy as a different user.
+User=ubuntu
+WorkingDirectory=/home/ubuntu/event-photo-finder
+ExecStart=/usr/bin/docker compose run --rm indexer

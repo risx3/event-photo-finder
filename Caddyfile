@@ -1,0 +1,8 @@
+# Caddy reverse proxy — provides free, auto-renewing HTTPS via Let's Encrypt.
+#
+# sslip.io resolves photos-34-196-24-81.sslip.io back to 34.196.24.81, so
+# Let's Encrypt's HTTP-01 challenge (and your guests' browsers) can reach
+# this server.
+photos-34-196-24-81.sslip.io {
+	reverse_proxy server:8000
+}
