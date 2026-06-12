@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
     _inference_pool.shutdown(wait=False)
 
 
-app = FastAPI(title="Event Photo Finder", lifespan=lifespan)
+app = FastAPI(title="Rishabh weds Pooja", lifespan=lifespan)
 
 # Rate limit the CPU-heavy face-matching endpoint to protect the server
 # from being overwhelmed by repeated public requests.
