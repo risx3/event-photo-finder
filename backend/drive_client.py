@@ -1,6 +1,7 @@
 import os
 import io
 import logging
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -28,13 +29,26 @@ class DriveClient:
         if not Path(sa_path).exists():
             raise FileNotFoundError(f"Service account JSON not found at: {sa_path}")
 
-        credentials = service_account.Credentials.from_service_account_file(
+        self._sa_path = sa_path
+        self._credentials = service_account.Credentials.from_service_account_file(
             sa_path, scopes=SCOPES
         )
-        self.service = build("drive", "v3", credentials=credentials)
+        self._local = threading.local()
         self.folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
         if not self.folder_id:
             raise ValueError("GOOGLE_DRIVE_FOLDER_ID is not set in .env")
+
+    @property
+    def service(self):
+        """A Drive API service instance, one per thread.
+
+        The underlying httplib2 HTTP connection is not thread-safe, so
+        sharing a single `service` object across ThreadPoolExecutor workers
+        can corrupt concurrent downloads (SSL errors, garbled responses).
+        """
+        if not hasattr(self._local, "service"):
+            self._local.service = build("drive", "v3", credentials=self._credentials)
+        return self._local.service
 
     def _list_children(self, folder_id: str, query_extra: str) -> list[dict]:
         """List all children of a folder matching an additional query clause."""
