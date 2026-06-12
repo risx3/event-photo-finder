@@ -15,7 +15,7 @@ import pickle
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait
 
 from tqdm import tqdm
 from dotenv import load_dotenv
@@ -81,49 +81,66 @@ def run_indexer():
 
     try:
         with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as executor:
-            futures = {
-                executor.submit(_download_one, (client, f)): f for f in files
-            }
+            # Bound the number of in-flight + downloaded-but-unprocessed files.
+            # Face extraction (CPU-bound, main thread) is slower than the
+            # download workers, so without this limit, downloaded files pile
+            # up in TEMP_DIR until disk space runs out.
+            MAX_PENDING = DOWNLOAD_WORKERS * 2
+
+            files_iter = iter(files)
+            pending = {}
+
+            def _submit_next():
+                f = next(files_iter, None)
+                if f is not None:
+                    pending[executor.submit(_download_one, (client, f))] = f
+
+            for _ in range(MAX_PENDING):
+                _submit_next()
 
             with tqdm(total=len(files), desc="Indexing photos", unit="photo") as pbar:
-                for future in as_completed(futures):
-                    file_info, dest, success = future.result()
-                    file_id = file_info["id"]
-                    filename = file_info["name"]
+                while pending:
+                    done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        del pending[future]
+                        file_info, dest, success = future.result()
+                        file_id = file_info["id"]
+                        filename = file_info["name"]
 
-                    try:
-                        if not success:
-                            logger.warning(f"Skipped (download failed): {filename}")
+                        try:
+                            if not success:
+                                logger.warning(f"Skipped (download failed): {filename}")
+                                skipped += 1
+                                continue
+
+                            # ── Phase 2: face extraction (CPU, main thread) ─
+                            embeddings = get_all_embeddings(str(dest))
+
+                            if not embeddings:
+                                logger.debug(f"No faces detected: {filename}")
+                                skipped += 1
+                                continue
+
+                            for emb in embeddings:
+                                index.append(
+                                    {
+                                        "embedding": emb,
+                                        "file_id": file_id,
+                                        "filename": filename,
+                                        "view_url": client.get_view_url(file_id),
+                                        "download_url": client.get_download_url(file_id),
+                                        "thumbnail_url": client.get_thumbnail_url(file_id),
+                                    }
+                                )
+                            total_faces += len(embeddings)
+
+                        except Exception as e:
+                            logger.error(f"Error processing {filename}: {e}")
                             skipped += 1
-                            continue
-
-                        # ── Phase 2: face extraction (CPU, main thread) ───────
-                        embeddings = get_all_embeddings(str(dest))
-
-                        if not embeddings:
-                            logger.debug(f"No faces detected: {filename}")
-                            skipped += 1
-                            continue
-
-                        for emb in embeddings:
-                            index.append(
-                                {
-                                    "embedding": emb,
-                                    "file_id": file_id,
-                                    "filename": filename,
-                                    "view_url": client.get_view_url(file_id),
-                                    "download_url": client.get_download_url(file_id),
-                                    "thumbnail_url": client.get_thumbnail_url(file_id),
-                                }
-                            )
-                        total_faces += len(embeddings)
-
-                    except Exception as e:
-                        logger.error(f"Error processing {filename}: {e}")
-                        skipped += 1
-                    finally:
-                        dest.unlink(missing_ok=True)
-                        pbar.update(1)
+                        finally:
+                            dest.unlink(missing_ok=True)
+                            pbar.update(1)
+                            _submit_next()
     except KeyboardInterrupt:
         logger.warning("Indexing interrupted — cleaning up temp files...")
         for f in TEMP_DIR.iterdir():
