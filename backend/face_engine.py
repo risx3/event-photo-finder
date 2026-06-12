@@ -136,5 +136,8 @@ def search_index(
         if fid not in seen or score > seen[fid]["similarity_score"]:
             seen[fid] = {**entry, "similarity_score": round(score, 4)}
 
-    results = sorted(seen.values(), key=lambda x: x["similarity_score"], reverse=True)
-    return results if max_results is None else results[:max_results]
+    by_score = sorted(seen.values(), key=lambda x: x["similarity_score"], reverse=True)
+    if max_results is not None:
+        by_score = by_score[:max_results]
+
+    return sorted(by_score, key=lambda x: x["filename"])
