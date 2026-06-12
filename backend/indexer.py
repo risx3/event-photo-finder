@@ -34,9 +34,10 @@ logger = logging.getLogger(__name__)
 TEMP_DIR = Path(__file__).parent.parent / "temp"
 INDEX_PATH = Path(__file__).parent / "embeddings_index.pkl"
 
-# Number of parallel Drive downloads. Drive API handles this well;
-# increase if your network allows it.
-DOWNLOAD_WORKERS = 10
+# Number of parallel Drive downloads. Each in-flight download holds a
+# decoded image in memory, so keep this low on low-RAM hosts (e.g. EC2
+# t3.small with 2GB RAM).
+DOWNLOAD_WORKERS = 3
 
 
 def _download_one(args: tuple) -> tuple[dict, Path, bool]:
