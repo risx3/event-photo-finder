@@ -4,5 +4,6 @@
 # Let's Encrypt's HTTP-01 challenge (and your guests' browsers) can reach
 # this server.
 photos-34-196-24-81.sslip.io {
+	encode gzip
 	reverse_proxy server:8000
 }

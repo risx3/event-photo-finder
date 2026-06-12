@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from dotenv import load_dotenv
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -216,3 +217,9 @@ async def serve_spa(full_path: str):
         {"detail": "Frontend not built. Run: cd frontend && npm run build"},
         status_code=503,
     )
+
+
+# Trust X-Forwarded-* headers from the Caddy reverse proxy so request.client.host
+# (used by slowapi's per-IP rate limiting) reflects the real guest IP rather than
+# Caddy's container IP — otherwise every guest shares one rate-limit bucket.
+app = ProxyHeadersMiddleware(app, trusted_hosts="*")
