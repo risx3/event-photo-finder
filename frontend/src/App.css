@@ -109,6 +109,12 @@ body {
   font-size: .8rem;
   border-top: 1px solid var(--gold-lt);
 }
+.footer-stamp {
+  margin-top: .4rem;
+  font-size: .7rem;
+  letter-spacing: .08em;
+  opacity: .6;
+}
 
 /* ── Upload card ────────────────────────────────────────────────── */
 .upload-card {
