@@ -2,23 +2,26 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --cream:   #fdf6ee;
-  --cream2:  #f5ebe0;
-  --gold:    #c9a84c;
-  --gold-dk: #b8943e;
-  --gold-lt: #e8d5a3;
-  --rose:    #c97b84;
-  --rose-lt: #f2d7d9;
+  --cream:   #fdf8ef;
+  --cream2:  #f6ebdc;
+  --gold:    #c8a233;
+  --gold-dk: #a8841f;
+  --gold-lt: #ecd9a5;
+  --rose:    #8c2c3b;
+  --rose-lt: #f3dde0;
   --text:    #3d2b1f;
   --muted:   #8c7265;
   --radius:  12px;
   --shadow:  0 4px 24px rgba(61,43,31,.10);
+  --font-display: 'Playfair Display', 'Georgia', serif;
+  --font-body:    'Cormorant Garamond', 'Georgia', serif;
 }
 
 body {
   background: var(--cream);
   color: var(--text);
-  font-family: 'Georgia', serif;
+  font-family: var(--font-body);
+  font-size: 1.05rem;
   min-height: 100vh;
 }
 
@@ -48,6 +51,14 @@ body {
   border-bottom: 1px solid var(--gold-lt);
   position: relative;
 }
+.site-header::before {
+  content: '';
+  display: block;
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--gold), var(--rose), var(--gold));
+}
 .settings-gear {
   position: absolute;
   top: 1.1rem; right: 1.25rem;
@@ -68,12 +79,14 @@ body {
 .header-line { flex: 1; max-width: 80px; height: 1px; background: var(--gold-lt); }
 
 .site-header h1 {
-  font-size: clamp(1.8rem, 5vw, 2.8rem);
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 5.5vw, 3.2rem);
   color: var(--text);
   letter-spacing: .04em;
   font-weight: normal;
+  font-style: italic;
 }
-.site-header h1 em { color: var(--gold); font-style: normal; }
+.site-header h1 em { color: var(--rose); font-style: italic; }
 .site-header p {
   margin-top: .5rem;
   color: var(--muted);
@@ -109,9 +122,11 @@ body {
   animation: fade-up 280ms ease;
 }
 .upload-card h2 {
+  font-family: var(--font-display);
   text-align: center;
-  font-size: 1.2rem;
+  font-size: 1.3rem;
   font-weight: normal;
+  font-style: italic;
   color: var(--muted);
   margin-bottom: 1.5rem;
   letter-spacing: .04em;
@@ -283,11 +298,13 @@ body {
   margin-bottom: 1.5rem;
 }
 .results-header h2 {
-  font-size: 1.3rem;
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  font-style: italic;
   font-weight: normal;
   color: var(--text);
 }
-.results-header h2 strong { color: var(--gold); }
+.results-header h2 strong { color: var(--rose); font-style: normal; }
 .download-all-btn {
   padding: .6rem 1.25rem;
   background: transparent;
