@@ -170,7 +170,6 @@ export default function App() {
 
       <footer className="site-footer">
         Made with love ♥ &nbsp;·&nbsp; Powered by face recognition
-        <div className="footer-stamp">Built by Rishabh</div>
       </footer>
 
       <SettingsPanel

@@ -13,6 +13,7 @@ export default function Header({ config, onSettingsClick }) {
 
       <h1><em>{config.eventName}</em></h1>
       <p>{config.eventSubtitle}</p>
+      <div className="header-stamp">Built by Rishabh</div>
     </header>
   )
 }
