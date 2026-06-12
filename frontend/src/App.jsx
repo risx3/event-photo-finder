@@ -136,6 +136,7 @@ export default function App() {
             previewLabel={previewLabel}
             onFile={handleFile}
             onFind={handleFind}
+            onReset={handleReset}
           />
         )}
 
