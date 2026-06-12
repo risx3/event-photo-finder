@@ -11,11 +11,14 @@ RUN npm run build
 # ── Stage 2: Python runtime ────────────────────────────────────────────────────
 FROM python:3.11-slim AS production
 
-# System libraries required by opencv-python-headless and ONNX Runtime
+# System libraries required by opencv-python-headless and ONNX Runtime.
+# build-essential (g++) is required because insightface has no prebuilt
+# wheel for some platforms and compiles a C extension during `uv sync`.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libglib2.0-0 \
       libgomp1 \
       curl \
+      build-essential \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy uv from the official image — faster and more reliable than pip install
