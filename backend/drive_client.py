@@ -36,16 +36,12 @@ class DriveClient:
         if not self.folder_id:
             raise ValueError("GOOGLE_DRIVE_FOLDER_ID is not set in .env")
 
-    def list_images(self) -> list[dict]:
-        """List all image files in the configured Drive folder."""
+    def _list_children(self, folder_id: str, query_extra: str) -> list[dict]:
+        """List all children of a folder matching an additional query clause."""
         files = []
         page_token = None
 
-        query = (
-            f"'{self.folder_id}' in parents and trashed = false and ("
-            + " or ".join(f"mimeType = '{m}'" for m in IMAGE_MIME_TYPES)
-            + ")"
-        )
+        query = f"'{folder_id}' in parents and trashed = false and ({query_extra})"
 
         while True:
             params = {
@@ -57,13 +53,31 @@ class DriveClient:
                 params["pageToken"] = page_token
 
             response = self.service.files().list(**params).execute()
-            batch = response.get("files", [])
-            files.extend(batch)
-            logger.info(f"Listed {len(batch)} files (total so far: {len(files)})")
+            files.extend(response.get("files", []))
 
             page_token = response.get("nextPageToken")
             if not page_token:
                 break
+
+        return files
+
+    def list_images(self) -> list[dict]:
+        """List all image files in the configured Drive folder, recursing into sub-folders."""
+        image_query = " or ".join(f"mimeType = '{m}'" for m in IMAGE_MIME_TYPES)
+        folder_query = "mimeType = 'application/vnd.google-apps.folder'"
+
+        files = []
+        folders_to_visit = [self.folder_id]
+
+        while folders_to_visit:
+            folder_id = folders_to_visit.pop()
+
+            batch = self._list_children(folder_id, image_query)
+            files.extend(batch)
+            logger.info(f"Listed {len(batch)} image(s) (total so far: {len(files)})")
+
+            subfolders = self._list_children(folder_id, folder_query)
+            folders_to_visit.extend(f["id"] for f in subfolders)
 
         return files
 
