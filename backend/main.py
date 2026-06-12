@@ -34,7 +34,8 @@ INDEX_PATH     = Path(__file__).parent / "embeddings_index.pkl"
 FRONTEND_DIST  = Path(__file__).parent.parent / "frontend" / "dist"
 
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.4"))
-MAX_RESULTS          = int(os.getenv("MAX_RESULTS", "50"))
+_max_results_env     = int(os.getenv("MAX_RESULTS", "50"))
+MAX_RESULTS          = None if _max_results_env <= 0 else _max_results_env
 MAX_UPLOAD_BYTES     = int(os.getenv("MAX_UPLOAD_MB", "10")) * 1024 * 1024  # default 10 MB
 EVENT_NAME           = os.getenv("EVENT_NAME", "My Event")
 EVENT_SUBTITLE       = os.getenv("EVENT_SUBTITLE", "Find all your photos from this event")

@@ -18,7 +18,10 @@ def get_face_app() -> FaceAnalysis:
         with _app_lock:
             if _app is None:  # double-checked locking
                 logger.info("Loading InsightFace buffalo_l model (downloads on first run)...")
-                _app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+                _app = FaceAnalysis(
+                    name="buffalo_l",
+                    providers=["CoreMLExecutionProvider", "CPUExecutionProvider"],
+                )
                 _app.prepare(ctx_id=0, det_size=(640, 640))
                 logger.info("InsightFace model loaded.")
     return _app
@@ -102,7 +105,7 @@ def search_index(
     vectors: np.ndarray,
     metadata: list[dict],
     threshold: float,
-    max_results: int,
+    max_results: int | None,
 ) -> list[dict]:
     """
     Vectorised cosine-similarity search.
@@ -134,4 +137,4 @@ def search_index(
             seen[fid] = {**entry, "similarity_score": round(score, 4)}
 
     results = sorted(seen.values(), key=lambda x: x["similarity_score"], reverse=True)
-    return results[:max_results]
+    return results if max_results is None else results[:max_results]
